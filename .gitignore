@@ -1,0 +1,17 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+.classpath
+.project
+.factorypath
+.settings/
+
+.idea/
+*.iml
+
+*.log
+*.tmp
+*.bak
+
+BOOT-INF/
+META-INF/
