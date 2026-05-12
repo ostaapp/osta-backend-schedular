@@ -22,6 +22,7 @@
   <properties>
     <java.version>13</java.version>
     <hibernate.version>5.4.32.Final</hibernate.version>
+    <lombok.version>1.18.30</lombok.version>
   </properties>
 
   <repositories>
@@ -80,6 +81,12 @@
       <version>${hibernate.version}</version>
       <scope>provided</scope>
     </dependency>
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
+    </dependency>
 
     <dependency>
       <groupId>com.zaxxer</groupId>
@@ -132,18 +139,10 @@
       <version>28.2-jre</version>
     </dependency>
     <dependency>
-      <groupId>com.dipcoin</groupId>
-      <artifactId>osta-api-common</artifactId>
-      <version>0.0.1-SNAPSHOT</version>
-      <scope>system</scope>
-      <systemPath>${project.basedir}/../osta-api-common/target/osta-api-common-0.0.1-SNAPSHOT.jar</systemPath>
-      <exclusions>
-        <exclusion>
-          <groupId>org.springframework.boot</groupId>
-          <artifactId>spring-boot-starter-log4j2</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
+			<groupId>com.dipcoin</groupId>
+			<artifactId>osta-api-common</artifactId>
+			<version>0.0.1-SNAPSHOT</version>
+		</dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -186,6 +185,11 @@
               <groupId>org.springframework.boot</groupId>
               <artifactId>spring-boot-configuration-processor</artifactId>
               <version>2.2.4.RELEASE</version>
+            </path>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
             </path>
           </annotationProcessorPaths>
         </configuration>
