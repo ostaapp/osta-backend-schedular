@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @EnableScheduling
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.dipcoin")
 @EnableConfigurationProperties(SchedulerProperties.class)
 public class OstaBackendSchedularApplication {
 
