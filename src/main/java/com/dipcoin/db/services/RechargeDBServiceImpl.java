@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.dipcoin.db.services.dao.RechargeDao;
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.Recharge;
 
 @Component("rechargeDBService")
 public class RechargeDBServiceImpl extends RechargeDBService {

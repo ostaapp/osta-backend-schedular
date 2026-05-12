@@ -2,7 +2,7 @@ package com.dipcoin.db.services.dao;
 
 import java.util.List;
 
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.Recharge;
 
 public interface RechargeDao extends GenericDao<Recharge> {
 

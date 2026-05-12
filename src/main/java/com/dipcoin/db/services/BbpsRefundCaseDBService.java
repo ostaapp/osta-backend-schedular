@@ -2,7 +2,7 @@ package com.dipcoin.db.services;
 
 import java.util.List;
 
-import com.dipcoin.scheduler.model.BbpsRefundCase;
+import com.dipcoin.db.services.model.BbpsRefundCase;
 
 public abstract class BbpsRefundCaseDBService {
 

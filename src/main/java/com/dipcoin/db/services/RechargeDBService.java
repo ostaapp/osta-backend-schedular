@@ -6,7 +6,7 @@ import java.util.concurrent.Future;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.AsyncResult;
 
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.Recharge;
 
 
 public abstract class RechargeDBService {

@@ -4,10 +4,10 @@ import com.dipcoin.api.config.ApplicationProperties;
 import com.dipcoin.commons.EmailClient;
 import com.dipcoin.scheduler.config.SchedulerProperties;
 import com.dipcoin.scheduler.constants.RechargeConstants;
-import com.dipcoin.scheduler.model.BbpsBillReminderLog;
-import com.dipcoin.scheduler.model.BillPaymentsInfo;
-import com.dipcoin.scheduler.model.Recharge;
-import com.dipcoin.scheduler.model.User;
+import com.dipcoin.db.services.model.BbpsBillReminderLog;
+import com.dipcoin.db.services.model.BillPaymentsInfo;
+import com.dipcoin.db.services.model.Recharge;
+import com.dipcoin.db.services.model.User;
 import com.dipcoin.scheduler.repository.BbpsBillReminderLogRepository;
 import com.dipcoin.scheduler.repository.BillPaymentsInfoRepository;
 import com.dipcoin.scheduler.repository.RechargeRepository;
@@ -257,8 +257,7 @@ public class BbpsBillReminderJob implements BillReminderJob {
     if (updateTimeCompare != 0) {
       return updateTimeCompare;
     }
-    return Integer.compare(left != null && left.getId() != null ? left.getId() : 0,
-        right != null && right.getId() != null ? right.getId() : 0);
+    return Integer.compare(left != null ? left.getId() : 0, right != null ? right.getId() : 0);
   }
 
   private Long parseEpochMillis(String value) {

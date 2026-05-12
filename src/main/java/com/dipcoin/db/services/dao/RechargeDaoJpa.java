@@ -12,7 +12,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Component;
 
 import com.dipcoin.db.services.commons.DBConstants;
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.Recharge;
 
 import io.micrometer.core.instrument.util.StringUtils;
 

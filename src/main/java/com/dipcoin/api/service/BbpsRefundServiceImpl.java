@@ -57,8 +57,8 @@ import com.dipcoin.partner.paymentGateway.model.InternalCapturedPgTransactionRes
 import com.dipcoin.partner.utils.ChecksumUtil;
 import com.dipcoin.scheduler.constants.BbpsRefundConstants;
 import com.dipcoin.scheduler.constants.RechargeConstants;
-import com.dipcoin.scheduler.model.BbpsRefundCase;
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.BbpsRefundCase;
+import com.dipcoin.db.services.model.Recharge;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

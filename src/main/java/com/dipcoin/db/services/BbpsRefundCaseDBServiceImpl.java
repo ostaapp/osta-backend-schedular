@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import com.dipcoin.db.services.dao.BbpsRefundCaseDao;
-import com.dipcoin.scheduler.model.BbpsRefundCase;
+import com.dipcoin.db.services.model.BbpsRefundCase;
 
 @Component("bbpsRefundCaseDBService")
 public class BbpsRefundCaseDBServiceImpl extends BbpsRefundCaseDBService {

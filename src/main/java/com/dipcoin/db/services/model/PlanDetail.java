@@ -1,4 +1,4 @@
-package com.dipcoin.scheduler.model;
+package com.dipcoin.db.services.model;
 
 public class PlanDetail {
 

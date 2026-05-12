@@ -7,7 +7,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
-import com.dipcoin.scheduler.model.BbpsRefundCase;
+import com.dipcoin.db.services.model.BbpsRefundCase;
 
 @Component("bbpsRefundCaseDao")
 public class BbpsRefundCaseDaoJpa extends GenericDaoImpl<BbpsRefundCase>

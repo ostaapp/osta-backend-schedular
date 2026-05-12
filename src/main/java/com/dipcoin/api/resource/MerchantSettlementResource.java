@@ -72,13 +72,13 @@ public class MerchantSettlementResource {
   @Autowired
   private DipcoinDBService coinDBService;
 
-  @Autowired
+  @Autowired(required = false)
   private EmailUtils emailUtils;
 
-  @Autowired
+  @Autowired(required = false)
   private SmsClient smsClient;
 
-  @Autowired
+  @Autowired(required = false)
   @Lazy
   private HttpServletContext httpServletContext;
 
@@ -92,7 +92,7 @@ public class MerchantSettlementResource {
   @Qualifier("com.dipcoin.metrics.MerchantMetricRegistry")
   private MerchantMetricRegistry merchantMetricRegistry;
 
-  @Autowired
+  @Autowired(required = false)
   private NotificationResource notificationResource;
 
   @Autowired
@@ -357,10 +357,11 @@ public class MerchantSettlementResource {
 
 	      // For Recharge and Fastag Merchant email must be disabled
 	      // Send email of cancellation to merchant
-	      if ((!(MerchantBusinessSegment.RECHARGE_BILLPAYMENTS.value() == merchant.getBusinessSegment()
-	          || MerchantBusinessSegment.TOLL.value() == merchant.getBusinessSegment()))
-	          && (user.getIsEmailVerified() == BooleanStatus.YES.value()
-	              && !emailUtils.sendCancelTransactionEmail(user.getFirstName(), merchant.getEmailId(),
+      if (emailUtils != null
+          && (!(MerchantBusinessSegment.RECHARGE_BILLPAYMENTS.value() == merchant.getBusinessSegment()
+          || MerchantBusinessSegment.TOLL.value() == merchant.getBusinessSegment()))
+          && (user.getIsEmailVerified() == BooleanStatus.YES.value()
+              && !emailUtils.sendCancelTransactionEmail(user.getFirstName(), merchant.getEmailId(),
 	                  dcoin.getCoin(), ostaUsedTime, nTx))) {
 	        LOG.error(
 	            "Failed to send email to user or email configuration not enabled as business segment of merchant is recharge or toll"
@@ -370,9 +371,10 @@ public class MerchantSettlementResource {
 	      // For Recharge and Fastag Merchant sms must be disabled
 	      // Send sms
 
-	      if ((!(MerchantBusinessSegment.RECHARGE_BILLPAYMENTS.value() == merchant.getBusinessSegment()
-	          || MerchantBusinessSegment.TOLL.value() == merchant.getBusinessSegment()))
-	          && (!applicationProperties.getAwsSMSClient() && !smsClient.sendSms(merchant.getOfficeNumber(),
+      if (smsClient != null
+          && (!(MerchantBusinessSegment.RECHARGE_BILLPAYMENTS.value() == merchant.getBusinessSegment()
+          || MerchantBusinessSegment.TOLL.value() == merchant.getBusinessSegment()))
+          && (!applicationProperties.getAwsSMSClient() && !smsClient.sendSms(merchant.getOfficeNumber(),
 	              Templates.MerchantCancelTransaction.format(dcoin.getCoin(), now, dcoin.getAmount()),
 	              smsEnabled))) {
 	        LOG.debug(LogFormatter.instance(traceId)
@@ -384,7 +386,8 @@ public class MerchantSettlementResource {
 	            .format());
 	      }
 
-	      if (applicationProperties.enableSMS() && applicationProperties.getAwsSMSClient()) {
+      if (notificationResource != null && applicationProperties.enableSMS()
+          && applicationProperties.getAwsSMSClient()) {
 
 	        NotificationRequestContext notificationRequestContext = new NotificationRequestContext();
 	        notificationRequestContext.setTraceId(traceId);

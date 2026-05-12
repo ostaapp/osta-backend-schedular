@@ -1,4 +1,4 @@
-package com.dipcoin.scheduler.model;
+package com.dipcoin.db.services.model;
 
 import java.io.Serializable;
 import java.math.BigDecimal;

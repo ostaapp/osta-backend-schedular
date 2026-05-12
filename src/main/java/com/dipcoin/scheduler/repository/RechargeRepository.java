@@ -1,6 +1,6 @@
 package com.dipcoin.scheduler.repository;
 
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.Recharge;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 

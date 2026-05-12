@@ -2,7 +2,7 @@ package com.dipcoin.db.services.dao;
 
 import java.util.List;
 
-import com.dipcoin.scheduler.model.BbpsRefundCase;
+import com.dipcoin.db.services.model.BbpsRefundCase;
 
 public interface BbpsRefundCaseDao extends GenericDao<BbpsRefundCase> {
 

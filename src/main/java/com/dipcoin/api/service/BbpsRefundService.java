@@ -2,8 +2,8 @@ package com.dipcoin.api.service;
 
 import com.dipcoin.api.model.CustomerBillPayRequest;
 import com.dipcoin.api.model.PartnerRefundSyncRequest;
-import com.dipcoin.scheduler.model.BbpsRefundCase;
-import com.dipcoin.scheduler.model.Recharge;
+import com.dipcoin.db.services.model.BbpsRefundCase;
+import com.dipcoin.db.services.model.Recharge;
 
 public interface BbpsRefundService {
 

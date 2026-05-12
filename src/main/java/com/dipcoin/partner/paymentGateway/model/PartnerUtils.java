@@ -29,7 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 import com.dipcoin.commons.LogFormatter;
-import com.dipcoin.scheduler.model.PlanDetail;
+import com.dipcoin.db.services.model.PlanDetail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dipcoin.partner.utils.PartnerClient.ChecksumFormat;
