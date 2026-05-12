@@ -6,6 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface RechargeRepository extends JpaRepository<Recharge, Integer> {
 
-  List<Recharge> findBySourceAndRequestTypeAndDueDate(String source, Integer requestType,
-      String dueDate);
+  List<Recharge> findBySourceAndStatusAndRequestTypeAndDueDateIsNotNull(String source,
+      Integer status, Integer requestType);
 }
