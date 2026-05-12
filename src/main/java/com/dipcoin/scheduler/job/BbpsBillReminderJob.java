@@ -257,10 +257,8 @@ public class BbpsBillReminderJob implements BillReminderJob {
     if (updateTimeCompare != 0) {
       return updateTimeCompare;
     }
-    return Integer.compare(
-    	    left != null ? left.getId() : 0,
-    	    right != null ? right.getId() : 0
-    	);
+    return Integer.compare(left != null && left.getId() != null ? left.getId() : 0,
+        right != null && right.getId() != null ? right.getId() : 0);
   }
 
   private Long parseEpochMillis(String value) {
