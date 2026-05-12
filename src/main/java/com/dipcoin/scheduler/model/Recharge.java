@@ -40,6 +40,8 @@ public class Recharge implements Serializable {
 
   private Integer status;
 
+  private String updateDateTime;
+
   @Column(name = "BillProviderId")
   private String billPaymentsInfo;
 
@@ -129,6 +131,14 @@ public class Recharge implements Serializable {
 
   public void setStatus(Integer status) {
     this.status = status;
+  }
+
+  public String getUpdateDateTime() {
+    return updateDateTime;
+  }
+
+  public void setUpdateDateTime(String updateDateTime) {
+    this.updateDateTime = updateDateTime;
   }
 
   public String getBillPaymentsInfo() {

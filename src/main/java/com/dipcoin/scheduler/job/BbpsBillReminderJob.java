@@ -17,12 +17,15 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
@@ -53,6 +56,7 @@ public class BbpsBillReminderJob implements BillReminderJob {
   private static final DateTimeFormatter DD_MM_YYYY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
   private static final DateTimeFormatter D_M_YYYY = DateTimeFormatter.ofPattern("d/M/yyyy");
   private static final DateTimeFormatter YYYY_MM_DD = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+  private static final int LOOKBACK_MONTHS = 5;
 
   private final RechargeRepository rechargeRepository;
 
@@ -92,19 +96,19 @@ public class BbpsBillReminderJob implements BillReminderJob {
   @Transactional
   public void runReminderCycle(LocalDate today) {
     LocalDate runDate = today != null ? today : LocalDate.now(schedulerProperties.resolveZoneId());
-    processEventForDueDate(runDate.plusDays(7), EVENT_DUE_IN_7_DAYS);
-    processEventForDueDate(runDate.plusDays(3), EVENT_DUE_IN_3_DAYS);
-    processEventForDueDate(runDate, EVENT_DUE_TODAY);
-    processEventForDueDate(runDate.minusDays(1), EVENT_BILL_EXPIRED);
-    processEventForDueDate(runDate.minusDays(2), EVENT_BILL_PAY_REMINDER_AFTER_EXPIRED);
+    processEventForDueDate(runDate, runDate.plusDays(7), EVENT_DUE_IN_7_DAYS);
+    processEventForDueDate(runDate, runDate.plusDays(3), EVENT_DUE_IN_3_DAYS);
+    processEventForDueDate(runDate, runDate, EVENT_DUE_TODAY);
+    processEventForDueDate(runDate, runDate.minusDays(1), EVENT_BILL_EXPIRED);
+    processEventForDueDate(runDate, runDate.minusDays(2), EVENT_BILL_PAY_REMINDER_AFTER_EXPIRED);
   }
 
-  private void processEventForDueDate(LocalDate dueDate, String eventType) {
+  private void processEventForDueDate(LocalDate runDate, LocalDate dueDate, String eventType) {
     if (dueDate == null || StringUtils.isBlank(eventType) || dueDate.isBefore(MIN_VALID_DUE_DATE)) {
       return;
     }
 
-    List<Recharge> candidates = findReminderCandidates(dueDate);
+    List<Recharge> candidates = findReminderCandidates(runDate, dueDate);
     if (CollectionUtils.isEmpty(candidates)) {
       LOG.info("BBPS bill reminder found no candidates. eventType={}, dueDate={}", eventType,
           formatDueDate(dueDate));
@@ -124,24 +128,38 @@ public class BbpsBillReminderJob implements BillReminderJob {
     }
   }
 
-  private List<Recharge> findReminderCandidates(LocalDate dueDate) {
+  private List<Recharge> findReminderCandidates(LocalDate runDate, LocalDate dueDate) {
+    ZoneId zoneId = schedulerProperties.resolveZoneId();
+    LocalDate effectiveRunDate = runDate != null ? runDate : LocalDate.now(zoneId);
+    long cutoffEpochMs = effectiveRunDate.minusMonths(LOOKBACK_MONTHS).atStartOfDay(zoneId).toInstant()
+        .toEpochMilli();
+    List<Recharge> recentTransactions =
+        rechargeRepository.findBySourceAndStatusAndRequestTypeAndDueDateIsNotNull(
+            RechargeConstants.BBPS_SOURCE, RechargeConstants.SUCCESS_STATUS,
+            RechargeConstants.SERVICE_REQUEST_TYPE);
+    if (CollectionUtils.isEmpty(recentTransactions)) {
+      return Collections.emptyList();
+    }
+
+    Map<String, Recharge> latestByCustomerBillerConsumer = new HashMap<>();
+    for (Recharge recharge : recentTransactions) {
+      if (!isRecentBbpsTransaction(recharge, cutoffEpochMs)) {
+        continue;
+      }
+      String latestCycleKey = buildLatestCycleKey(recharge);
+      Recharge existing = latestByCustomerBillerConsumer.get(latestCycleKey);
+      if (existing == null || compareLatestTransaction(recharge, existing) > 0) {
+        latestByCustomerBillerConsumer.put(latestCycleKey, recharge);
+      }
+    }
+
     Set<Recharge> candidates = new LinkedHashSet<>();
-    for (String dueDateValue : dueDateLookupValues(dueDate)) {
-      List<Recharge> result = rechargeRepository.findBySourceAndRequestTypeAndDueDate(
-          RechargeConstants.BBPS_SOURCE, RechargeConstants.SERVICE_REQUEST_TYPE, dueDateValue);
-      if (!CollectionUtils.isEmpty(result)) {
-        candidates.addAll(result);
+    for (Recharge latestRecharge : latestByCustomerBillerConsumer.values()) {
+      if (isValidDueDate(latestRecharge.getDueDate(), dueDate)) {
+        candidates.add(latestRecharge);
       }
     }
     return Arrays.asList(candidates.toArray(new Recharge[0]));
-  }
-
-  private Set<String> dueDateLookupValues(LocalDate dueDate) {
-    Set<String> values = new LinkedHashSet<>();
-    values.add(dueDate.format(DD_MM_YYYY));
-    values.add(dueDate.format(D_M_YYYY));
-    values.add(dueDate.format(YYYY_MM_DD));
-    return values;
   }
 
   private void processRecharge(Recharge recharge, LocalDate expectedDueDate, String eventType,
@@ -220,6 +238,39 @@ public class BbpsBillReminderJob implements BillReminderJob {
 
   private boolean isCompletedBillPayment(Recharge recharge) {
     return Integer.valueOf(RechargeConstants.SUCCESS_STATUS).equals(recharge.getStatus());
+  }
+
+  private boolean isRecentBbpsTransaction(Recharge recharge, long cutoffEpochMs) {
+    if (recharge == null || !isCompletedBillPayment(recharge)
+        || StringUtils.isBlank(recharge.getDueDate())) {
+      return false;
+    }
+    Long updateEpochMs = parseEpochMillis(recharge.getUpdateDateTime());
+    return updateEpochMs != null && updateEpochMs >= cutoffEpochMs;
+  }
+
+  private int compareLatestTransaction(Recharge left, Recharge right) {
+    Long leftUpdateTime = parseEpochMillis(left != null ? left.getUpdateDateTime() : null);
+    Long rightUpdateTime = parseEpochMillis(right != null ? right.getUpdateDateTime() : null);
+    int updateTimeCompare = Long.compare(leftUpdateTime != null ? leftUpdateTime : 0L,
+        rightUpdateTime != null ? rightUpdateTime : 0L);
+    if (updateTimeCompare != 0) {
+      return updateTimeCompare;
+    }
+    return Integer.compare(left != null && left.getId() != null ? left.getId() : 0,
+        right != null && right.getId() != null ? right.getId() : 0);
+  }
+
+  private Long parseEpochMillis(String value) {
+    String trimmedValue = StringUtils.trimToNull(value);
+    if (trimmedValue == null || !NumberUtils.isDigits(trimmedValue)) {
+      return null;
+    }
+    try {
+      return Long.valueOf(trimmedValue);
+    } catch (NumberFormatException e) {
+      return null;
+    }
   }
 
   private LocalDate parseDueDate(String rawDueDate) {
@@ -338,6 +389,12 @@ public class BbpsBillReminderJob implements BillReminderJob {
         StringUtils.defaultString(billerId), StringUtils.defaultString(consumerNo),
         StringUtils.defaultString(dueDate), StringUtils.defaultString(eventType)), "|");
     return sha256(rawKey);
+  }
+
+  private String buildLatestCycleKey(Recharge recharge) {
+    return StringUtils.join(Arrays.asList(StringUtils.defaultString(recharge.getCustomerId()),
+        StringUtils.defaultString(resolveBillerId(recharge)),
+        StringUtils.defaultString(recharge.getConsumerNo())), "|");
   }
 
   private String sha256(String value) {
