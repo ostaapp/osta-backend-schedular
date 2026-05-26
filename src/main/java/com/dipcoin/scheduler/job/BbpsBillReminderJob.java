@@ -42,6 +42,7 @@ public class BbpsBillReminderJob implements BillReminderJob {
 
   private static final Logger LOG = LoggerFactory.getLogger(BbpsBillReminderJob.class);
 
+  private static final String EVENT_DUE_IN_14_DAYS = "DUE_IN_14_DAYS";
   private static final String EVENT_DUE_IN_7_DAYS = "DUE_IN_7_DAYS";
   private static final String EVENT_DUE_IN_3_DAYS = "DUE_IN_3_DAYS";
   private static final String EVENT_DUE_TODAY = "DUE_TODAY";
@@ -84,7 +85,7 @@ public class BbpsBillReminderJob implements BillReminderJob {
   @Value("${com.dipcoin.bbps.billReminder.liveCheck.enabled:true}")
   private boolean liveCheckEnabled;
 
-  @Value("${com.dipcoin.bbps.billReminder.liveCheck.events:DUE_TODAY,BILL_EXPIRED,BILL_PAY_REMINDER_AFTER_EXPIRED}")
+  @Value("${com.dipcoin.bbps.billReminder.liveCheck.events:DUE_IN_14_DAYS,DUE_IN_7_DAYS,DUE_IN_3_DAYS,DUE_TODAY,BILL_EXPIRED,BILL_PAY_REMINDER_AFTER_EXPIRED}")
   private String liveCheckEvents;
 
   @Value("${com.dipcoin.bbps.billReminder.verification.maxAgeMs:14400000}")
@@ -122,6 +123,7 @@ public class BbpsBillReminderJob implements BillReminderJob {
   @Transactional
   public void runReminderCycle(LocalDate today) {
     LocalDate runDate = today != null ? today : LocalDate.now(schedulerProperties.resolveZoneId());
+    processEventForDueDate(runDate, runDate.plusDays(14), EVENT_DUE_IN_14_DAYS);
     processEventForDueDate(runDate, runDate.plusDays(7), EVENT_DUE_IN_7_DAYS);
     processEventForDueDate(runDate, runDate.plusDays(3), EVENT_DUE_IN_3_DAYS);
     processEventForDueDate(runDate, runDate, EVENT_DUE_TODAY);
@@ -587,6 +589,9 @@ public class BbpsBillReminderJob implements BillReminderJob {
   }
 
   private String buildReminderLine(String eventType, String dueDate) {
+    if (EVENT_DUE_IN_14_DAYS.equals(eventType)) {
+      return "Your BBPS bill is due in 14 days on " + dueDate + ".";
+    }
     if (EVENT_DUE_IN_7_DAYS.equals(eventType)) {
       return "Your BBPS bill is due in 7 days on " + dueDate + ".";
     }

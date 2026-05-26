@@ -28,13 +28,14 @@ Production config currently schedules bill reminders at 2:00 PM IST.
 2. If `com.dipcoin.scheduler.enabled=false`, execution is skipped.
 3. Scheduler calls `BillReminderJob.runReminderCycle()`.
 4. Job resolves `today` using configured scheduler zone.
-5. Job processes reminder events for five calculated due dates.
+5. Job processes reminder events for six calculated due dates.
 6. Scheduler-level exceptions are caught and logged, so future cron executions continue.
 
 ## Reminder Events
 
 | Event type | Due date checked | Meaning |
 | --- | --- | --- |
+| `DUE_IN_14_DAYS` | `today + 14 days` | Customer bill is due in 14 days. |
 | `DUE_IN_7_DAYS` | `today + 7 days` | Customer bill is due in 7 days. |
 | `DUE_IN_3_DAYS` | `today + 3 days` | Customer bill is due in 3 days. |
 | `DUE_TODAY` | `today` | Customer bill is due today. |
@@ -138,6 +139,15 @@ Message includes:
 - Amount
 - Due date
 - Request to pay through Osta to avoid late fees or interruption
+
+Live BillFetch verification runs before sending reminders for configured events. The default configured list is:
+
+- `DUE_IN_14_DAYS`
+- `DUE_IN_7_DAYS`
+- `DUE_IN_3_DAYS`
+- `DUE_TODAY`
+- `BILL_EXPIRED`
+- `BILL_PAY_REMINDER_AFTER_EXPIRED`
 
 Consumer number masking:
 
