@@ -1,6 +1,7 @@
 package com.dipcoin.db.services.model;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
 import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
@@ -55,8 +56,44 @@ public class BbpsBillReminderLog implements Serializable {
   @Column(name = "providerResponse", length = 1000)
   private String providerResponse;
 
+  @Column(name = "verificationStatus", length = 64)
+  private String verificationStatus;
+
+  @Column(name = "verificationClientTransactionId", length = 128)
+  private String verificationClientTransactionId;
+
+  @Column(name = "verificationStartedAt")
+  private Long verificationStartedAt;
+
+  @Column(name = "verificationCompletedAt")
+  private Long verificationCompletedAt;
+
+  @Column(name = "verificationAttempts")
+  private Integer verificationAttempts;
+
+  @Column(name = "liveCheckStatus", length = 64)
+  private String liveCheckStatus;
+
+  @Column(name = "liveCheckReason", length = 500)
+  private String liveCheckReason;
+
+  @Column(name = "liveCheckDueDate", length = 32)
+  private String liveCheckDueDate;
+
+  @Column(name = "liveCheckAmount")
+  private BigDecimal liveCheckAmount;
+
+  @Column(name = "liveCheckRawResponse", length = 4000)
+  private String liveCheckRawResponse;
+
+  @Column(name = "reminderSkippedReason", length = 255)
+  private String reminderSkippedReason;
+
   @Column(name = "createdAt")
   private Long createdAt;
+
+  @Column(name = "updatedAt")
+  private Long updatedAt;
 
   public Integer getId() {
     return id;
@@ -162,11 +199,107 @@ public class BbpsBillReminderLog implements Serializable {
     this.providerResponse = providerResponse;
   }
 
+  public String getVerificationStatus() {
+    return verificationStatus;
+  }
+
+  public void setVerificationStatus(String verificationStatus) {
+    this.verificationStatus = verificationStatus;
+  }
+
+  public String getVerificationClientTransactionId() {
+    return verificationClientTransactionId;
+  }
+
+  public void setVerificationClientTransactionId(String verificationClientTransactionId) {
+    this.verificationClientTransactionId = verificationClientTransactionId;
+  }
+
+  public Long getVerificationStartedAt() {
+    return verificationStartedAt;
+  }
+
+  public void setVerificationStartedAt(Long verificationStartedAt) {
+    this.verificationStartedAt = verificationStartedAt;
+  }
+
+  public Long getVerificationCompletedAt() {
+    return verificationCompletedAt;
+  }
+
+  public void setVerificationCompletedAt(Long verificationCompletedAt) {
+    this.verificationCompletedAt = verificationCompletedAt;
+  }
+
+  public Integer getVerificationAttempts() {
+    return verificationAttempts;
+  }
+
+  public void setVerificationAttempts(Integer verificationAttempts) {
+    this.verificationAttempts = verificationAttempts;
+  }
+
+  public String getLiveCheckStatus() {
+    return liveCheckStatus;
+  }
+
+  public void setLiveCheckStatus(String liveCheckStatus) {
+    this.liveCheckStatus = liveCheckStatus;
+  }
+
+  public String getLiveCheckReason() {
+    return liveCheckReason;
+  }
+
+  public void setLiveCheckReason(String liveCheckReason) {
+    this.liveCheckReason = liveCheckReason;
+  }
+
+  public String getLiveCheckDueDate() {
+    return liveCheckDueDate;
+  }
+
+  public void setLiveCheckDueDate(String liveCheckDueDate) {
+    this.liveCheckDueDate = liveCheckDueDate;
+  }
+
+  public BigDecimal getLiveCheckAmount() {
+    return liveCheckAmount;
+  }
+
+  public void setLiveCheckAmount(BigDecimal liveCheckAmount) {
+    this.liveCheckAmount = liveCheckAmount;
+  }
+
+  public String getLiveCheckRawResponse() {
+    return liveCheckRawResponse;
+  }
+
+  public void setLiveCheckRawResponse(String liveCheckRawResponse) {
+    this.liveCheckRawResponse = liveCheckRawResponse;
+  }
+
+  public String getReminderSkippedReason() {
+    return reminderSkippedReason;
+  }
+
+  public void setReminderSkippedReason(String reminderSkippedReason) {
+    this.reminderSkippedReason = reminderSkippedReason;
+  }
+
   public Long getCreatedAt() {
     return createdAt;
   }
 
   public void setCreatedAt(Long createdAt) {
     this.createdAt = createdAt;
+  }
+
+  public Long getUpdatedAt() {
+    return updatedAt;
+  }
+
+  public void setUpdatedAt(Long updatedAt) {
+    this.updatedAt = updatedAt;
   }
 }

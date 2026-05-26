@@ -61,6 +61,9 @@ public class FinacusHttpClient {
     private RestTemplate restTemplate;
 
     @Autowired
+    private ChecksumUtil checksumUtil;
+
+    @Autowired
     private ObjectMapper objectMapper = new ObjectMapper()
             .configure(com.fasterxml.jackson.databind.MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, true)
             .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -96,6 +99,15 @@ public class FinacusHttpClient {
 
     @Value("${finacus.init.channel}")
     private String finacusInitChannel;
+
+    @Value("${finacus.request.mobile-number:}")
+    private String finacusRequestMobileNumber;
+
+    @Value("${finacus.request.ip-address:}")
+    private String finacusRequestIpAddress;
+
+    @Value("${finacus.request.mac-address:}")
+    private String finacusRequestMacAddress;
 
     @Value("${finacus.payment.channel}")
     private String finacusPaymentChannel;
@@ -226,6 +238,49 @@ public class FinacusHttpClient {
         } catch (Exception e) {
             return value;
         }
+    }
+
+    public JsonNode billFetchForReminder(String billerId, String customerParams) throws Exception {
+        String dataToCalculate = String.join("|",
+                StringUtils.defaultString(finacusAgentId),
+                StringUtils.defaultString(billerId),
+                StringUtils.defaultString(finacusInitChannel),
+                StringUtils.defaultString(finacusRequestMobileNumber),
+                StringUtils.defaultString(customerParams),
+                StringUtils.defaultString(finacusRequestIpAddress),
+                StringUtils.defaultString(finacusRequestMacAddress));
+
+        String checksum = checksumUtil.generateChecksum(dataToCalculate);
+
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("agentId", encode(finacusAgentId));
+        form.add("billerId", encode(billerId));
+        form.add("initChannel", encode(finacusInitChannel));
+        form.add("mobileNumber", encode(finacusRequestMobileNumber));
+        form.add("customerParams", customerParams);
+        form.add("ip", encode(finacusRequestIpAddress));
+        form.add("mac", encode(finacusRequestMacAddress));
+        form.add("checksum", checksum);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(form, headers);
+
+        String apiUrl = baseUrl + "/SendBillFetchRequest";
+        log.info("Calling Finacus bill fetch for BBPS reminder verification. billerId={}", billerId);
+        String rawResponse = restTemplate.postForObject(apiUrl, entity, String.class);
+        String json = extractJsonFromFinacusString(rawResponse);
+        if (StringUtils.isBlank(json)) {
+            throw new Exception("Empty bill fetch response from Finacus");
+        }
+        return objectMapper.readTree(json);
+    }
+
+    private String extractJsonFromFinacusString(String xml) {
+        if (xml == null) {
+            return null;
+        }
+        return xml.replaceAll("(?s).*<string[^>]*>(.*)</string>.*", "$1");
     }
     
     /**

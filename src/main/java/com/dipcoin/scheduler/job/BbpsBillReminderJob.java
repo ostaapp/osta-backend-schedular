@@ -32,6 +32,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -51,6 +52,12 @@ public class BbpsBillReminderJob implements BillReminderJob {
   private static final String EMAIL_SENT = "SENT";
   private static final String EMAIL_FAILED = "FAILED";
   private static final String EMAIL_PENDING = "PENDING";
+  private static final String EMAIL_SKIPPED = "SKIPPED";
+  private static final String EMAIL_PENDING_VERIFICATION = "PENDING_VERIFICATION";
+
+  private static final String VERIFICATION_PENDING = "PENDING_VERIFICATION";
+  private static final String VERIFICATION_IN_PROGRESS = "VERIFICATION_IN_PROGRESS";
+  private static final String VERIFICATION_TIMEOUT = "SKIPPED_FETCH_TIMEOUT";
 
   private static final LocalDate MIN_VALID_DUE_DATE = LocalDate.of(2026, 1, 1);
   private static final DateTimeFormatter DD_MM_YYYY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -72,11 +79,29 @@ public class BbpsBillReminderJob implements BillReminderJob {
 
   private final SchedulerProperties schedulerProperties;
 
+  private final BbpsBillReminderVerificationService verificationService;
+
+  @Value("${com.dipcoin.bbps.billReminder.liveCheck.enabled:true}")
+  private boolean liveCheckEnabled;
+
+  @Value("${com.dipcoin.bbps.billReminder.liveCheck.events:DUE_TODAY,BILL_EXPIRED,BILL_PAY_REMINDER_AFTER_EXPIRED}")
+  private String liveCheckEvents;
+
+  @Value("${com.dipcoin.bbps.billReminder.verification.maxAgeMs:14400000}")
+  private long verificationMaxAgeMs;
+
+  @Value("${com.dipcoin.bbps.billReminder.verification.maxAttempts:24}")
+  private int verificationMaxAttempts;
+
+  @Value("${com.dipcoin.bbps.billReminder.verification.batchSize:100}")
+  private int verificationBatchSize;
+
   public BbpsBillReminderJob(RechargeRepository rechargeRepository,
       BbpsBillReminderLogRepository reminderLogRepository,
       BillPaymentsInfoRepository billPaymentsInfoRepository, UserRepository userRepository,
       EmailClient emailClient, ApplicationProperties applicationProperties,
-      SchedulerProperties schedulerProperties) {
+      SchedulerProperties schedulerProperties,
+      BbpsBillReminderVerificationService verificationService) {
     this.rechargeRepository = rechargeRepository;
     this.reminderLogRepository = reminderLogRepository;
     this.billPaymentsInfoRepository = billPaymentsInfoRepository;
@@ -84,6 +109,7 @@ public class BbpsBillReminderJob implements BillReminderJob {
     this.emailClient = emailClient;
     this.applicationProperties = applicationProperties;
     this.schedulerProperties = schedulerProperties;
+    this.verificationService = verificationService;
   }
 
   @Override
@@ -197,6 +223,14 @@ public class BbpsBillReminderJob implements BillReminderJob {
       return;
     }
 
+    if (shouldVerifyBeforeReminder(eventType)) {
+      addPendingVerificationLog(dedupeKey, recharge, customerId, billerId, billerName, consumerNo,
+          dueDate, eventType, email);
+      LOG.info("BBPS bill reminder queued for live verification. rechargeId={}, eventType={}, dueDate={}",
+          recharge.getId(), eventType, dueDate);
+      return;
+    }
+
     String subject = buildEmailSubject(eventType);
     String message = buildEmailMessage(user, eventType, billerName, consumerNo, amount, dueDate);
     boolean sent = emailClient.sendEmail(applicationProperties.getSenderEmail(),
@@ -226,8 +260,200 @@ public class BbpsBillReminderJob implements BillReminderJob {
     log.setEmailStatus(status);
     log.setMessage(message);
     log.setProviderResponse(providerResponse);
-    log.setCreatedAt(System.currentTimeMillis());
+    long now = System.currentTimeMillis();
+    log.setCreatedAt(now);
+    log.setUpdatedAt(now);
     reminderLogRepository.save(log);
+  }
+
+  private void addPendingVerificationLog(String dedupeKey, Recharge recharge, String customerId,
+      String billerId, String billerName, String consumerNo, String dueDate, String eventType,
+      String email) {
+    BbpsBillReminderLog log = new BbpsBillReminderLog();
+    long now = System.currentTimeMillis();
+    log.setDedupeKey(dedupeKey);
+    log.setRechargeId(recharge.getId());
+    log.setCustomerId(customerId);
+    log.setEmail(email);
+    log.setBillerId(billerId);
+    log.setBillerName(billerName);
+    log.setConsumerNo(consumerNo);
+    log.setDueDate(dueDate);
+    log.setEventType(eventType);
+    log.setEmailStatus(EMAIL_PENDING_VERIFICATION);
+    log.setMessage("Reminder pending live bill verification.");
+    log.setProviderResponse(VERIFICATION_PENDING);
+    log.setVerificationStatus(VERIFICATION_PENDING);
+    log.setVerificationClientTransactionId(
+        buildVerificationClientTransactionId(recharge, eventType, dedupeKey));
+    log.setVerificationStartedAt(now);
+    log.setVerificationAttempts(0);
+    log.setCreatedAt(now);
+    log.setUpdatedAt(now);
+    reminderLogRepository.save(log);
+  }
+
+  @Override
+  public void processPendingVerifications() {
+    long now = System.currentTimeMillis();
+    List<BbpsBillReminderLog> pendingLogs = reminderLogRepository
+        .findTop100ByVerificationStatusInAndVerificationStartedAtLessThanEqualOrderByCreatedAtAsc(
+            Arrays.asList(VERIFICATION_PENDING, VERIFICATION_IN_PROGRESS), now);
+    if (CollectionUtils.isEmpty(pendingLogs)) {
+      LOG.info("BBPS bill reminder verification found no pending logs.");
+      return;
+    }
+
+    int maxBatchSize = verificationBatchSize > 0 ? verificationBatchSize : 100;
+    int processed = 0;
+    for (BbpsBillReminderLog log : pendingLogs) {
+      if (processed >= maxBatchSize) {
+        break;
+      }
+      processed++;
+      try {
+        processPendingVerification(log, now);
+      } catch (Exception e) {
+        LOG.error("Failed to process pending BBPS bill reminder verification. logId={}",
+            log != null ? log.getId() : null, e);
+      }
+    }
+  }
+
+  private void processPendingVerification(BbpsBillReminderLog log, long now) {
+    if (log == null) {
+      return;
+    }
+    if (isVerificationExpired(log, now)) {
+      markVerificationSkipped(log, VERIFICATION_TIMEOUT,
+          "Live bill verification timed out before reminder could be sent.", null, now);
+      return;
+    }
+
+    Optional<Recharge> rechargeOptional =
+        log.getRechargeId() != null ? rechargeRepository.findById(log.getRechargeId())
+            : Optional.<Recharge>empty();
+    if (!rechargeOptional.isPresent()) {
+      markVerificationSkipped(log,
+          BbpsBillReminderVerificationService.STATUS_SKIPPED_FETCH_FAILED,
+          "Recharge record not found for reminder verification.", null, now);
+      return;
+    }
+
+    int attempts = log.getVerificationAttempts() != null ? log.getVerificationAttempts() : 0;
+    log.setVerificationAttempts(attempts + 1);
+    log.setVerificationStatus(VERIFICATION_IN_PROGRESS);
+    log.setUpdatedAt(now);
+    reminderLogRepository.save(log);
+
+    Recharge recharge = rechargeOptional.get();
+    BillReminderVerificationResult result =
+        verificationService.verify(recharge, parseDueDate(log.getDueDate()));
+    applyVerificationResult(log, result, now);
+
+    if (result != null && result.isSendReminder()) {
+      sendVerifiedReminder(log, recharge);
+      return;
+    }
+
+    String status = result != null ? result.getStatus()
+        : BbpsBillReminderVerificationService.STATUS_SKIPPED_FETCH_FAILED;
+    String reason = result != null ? result.getReason() : "Live bill verification did not return a result.";
+    markVerificationSkipped(log, status, reason, result, System.currentTimeMillis());
+  }
+
+  private void applyVerificationResult(BbpsBillReminderLog log,
+      BillReminderVerificationResult result, long now) {
+    if (log == null || result == null) {
+      return;
+    }
+    log.setLiveCheckStatus(result.getStatus());
+    log.setLiveCheckReason(truncate(result.getReason(), 500));
+    log.setLiveCheckDueDate(result.getLatestDueDate());
+    log.setLiveCheckAmount(result.getLatestAmount());
+    log.setLiveCheckRawResponse(truncate(result.getRawResponse(), 4000));
+    log.setUpdatedAt(now);
+    reminderLogRepository.save(log);
+  }
+
+  private void sendVerifiedReminder(BbpsBillReminderLog log, Recharge recharge) {
+    long now = System.currentTimeMillis();
+    User user = resolveUser(log.getCustomerId());
+    String email = StringUtils.defaultIfBlank(log.getEmail(), user != null ? user.getEmail() : null);
+    if (StringUtils.isBlank(email)) {
+      log.setEmailStatus(EMAIL_PENDING);
+      log.setProviderResponse("EMAIL_PENDING_NO_EMAIL");
+      log.setReminderSkippedReason("Email reminder pending because customer email is not available.");
+      log.setVerificationCompletedAt(now);
+      log.setUpdatedAt(now);
+      reminderLogRepository.save(log);
+      return;
+    }
+
+    BigDecimal amount = log.getLiveCheckAmount() != null ? log.getLiveCheckAmount() : resolveAmount(recharge);
+    String dueDate = StringUtils.defaultIfBlank(log.getLiveCheckDueDate(), log.getDueDate());
+    String subject = buildEmailSubject(log.getEventType());
+    String message = buildEmailMessage(user, log.getEventType(), log.getBillerName(),
+        log.getConsumerNo(), amount, dueDate);
+    boolean sent = emailClient.sendEmail(applicationProperties.getSenderEmail(),
+        Collections.singletonList(email), subject, message, false, null, null);
+
+    log.setEmail(email);
+    log.setEmailStatus(sent ? EMAIL_SENT : EMAIL_FAILED);
+    log.setMessage(message);
+    log.setProviderResponse(sent ? "EMAIL_SENT_AFTER_VERIFICATION"
+        : "EMAIL_FAILED_AFTER_VERIFICATION");
+    log.setVerificationStatus(BbpsBillReminderVerificationService.STATUS_VERIFIED_DUE);
+    log.setVerificationCompletedAt(now);
+    log.setUpdatedAt(now);
+    reminderLogRepository.save(log);
+
+    LOG.info("BBPS bill reminder email processed after live verification. rechargeId={}, eventType={}, sent={}",
+        recharge.getId(), log.getEventType(), sent);
+  }
+
+  private void markVerificationSkipped(BbpsBillReminderLog log, String status, String reason,
+      BillReminderVerificationResult result, long now) {
+    if (result != null) {
+      applyVerificationResult(log, result, now);
+    }
+    log.setVerificationStatus(status);
+    log.setVerificationCompletedAt(now);
+    log.setEmailStatus(EMAIL_SKIPPED);
+    log.setProviderResponse(status);
+    log.setReminderSkippedReason(truncate(reason, 255));
+    log.setUpdatedAt(now);
+    reminderLogRepository.save(log);
+    LOG.info("BBPS bill reminder skipped after live verification. logId={}, rechargeId={}, status={}, reason={}",
+        log.getId(), log.getRechargeId(), status, reason);
+  }
+
+  private boolean isVerificationExpired(BbpsBillReminderLog log, long now) {
+    int attempts = log.getVerificationAttempts() != null ? log.getVerificationAttempts() : 0;
+    if (verificationMaxAttempts > 0 && attempts >= verificationMaxAttempts) {
+      return true;
+    }
+    Long startedAt = log.getVerificationStartedAt();
+    long maxAgeMs = verificationMaxAgeMs > 0 ? verificationMaxAgeMs : 14400000L;
+    return startedAt != null && now - startedAt.longValue() > maxAgeMs;
+  }
+
+  private boolean shouldVerifyBeforeReminder(String eventType) {
+    if (!liveCheckEnabled || StringUtils.isBlank(eventType)) {
+      return false;
+    }
+    for (String configuredEvent : StringUtils.split(StringUtils.defaultString(liveCheckEvents), ",")) {
+      if (eventType.equals(StringUtils.trim(configuredEvent))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private String buildVerificationClientTransactionId(Recharge recharge, String eventType,
+      String dedupeKey) {
+    String hash = StringUtils.upperCase(StringUtils.left(StringUtils.defaultString(dedupeKey), 8));
+    return "BRV-" + recharge.getId() + "-" + eventType + "-" + hash;
   }
 
   private boolean isValidDueDate(String rawDueDate, LocalDate expectedDueDate) {
@@ -339,7 +565,8 @@ public class BbpsBillReminderJob implements BillReminderJob {
 
   private String buildEmailMessage(User user, String eventType, String billerName, String consumerNo,
       BigDecimal amount, String dueDate) {
-    String customerName = StringUtils.defaultIfBlank(user.getFirstName(), "Customer");
+    String customerName = StringUtils.defaultIfBlank(user != null ? user.getFirstName() : null,
+        "Customer");
     String amountText = amount != null ? "Rs. " + amount.toPlainString() : "the pending amount";
     String maskedConsumerNo = maskConsumerNo(consumerNo);
     String reminderLine = buildReminderLine(eventType, dueDate);
@@ -420,5 +647,12 @@ public class BbpsBillReminderJob implements BillReminderJob {
 
   private String formatDueDate(LocalDate dueDate) {
     return dueDate.format(DD_MM_YYYY);
+  }
+
+  private String truncate(String value, int maxLength) {
+    if (value == null || value.length() <= maxLength) {
+      return value;
+    }
+    return value.substring(0, maxLength);
   }
 }
