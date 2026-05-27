@@ -70,6 +70,11 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
   private static final int DEFAULT_BATCH_SIZE = 200;
   private static final String FINACUS_STATUS_BY_REFERENCE_ID = "REFERENCE_ID";
   private static final String FINACUS_STATUS_BY_TRANSACTION_ID = "TRANSACTION_ID";
+  private static final String PAYMENT_NOT_INITIATED_CODE = "PAYMENT_NOT_INITIATED";
+  private static final String PAYMENT_NOT_INITIATED_STATUS = "NOT_INITIATED";
+  private static final String PAYMENT_PROCESS_PENDING_MESSAGE = "PAYMENT_PROCESS_PENDING";
+  private static final String PAYMENT_NOT_INITIATED_MESSAGE =
+      "Customer abandoned payment before Aggrepay initiation";
 
   @Value("${com.dipcoin.reconciliation.refundScheduler.orphanGraceMs:600000}")
   private long orphanGraceMs;
@@ -1539,7 +1544,121 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
   private BbpsRefundCase finalizeRefundCase(BbpsRefundCase refundCase, Recharge recharge,
       String source, String originalState) {
     syncDipcoinCancellationState(refundCase, recharge, source);
+    markRechargePaymentNotInitiatedIfEligible(refundCase, recharge, source);
     return saveRefundCaseIfChanged(refundCase, originalState);
+  }
+
+  private void markRechargePaymentNotInitiatedIfEligible(BbpsRefundCase refundCase,
+      Recharge recharge, String source) {
+    if (!shouldMarkRechargePaymentNotInitiated(refundCase, recharge, source)) {
+      return;
+    }
+
+    try {
+      String updateDateTime = String.valueOf(now());
+      int updated = rechargeDBService.markPaymentNotInitiatedIfPending(recharge.getId(),
+          RechargeConstants.RechargeStatus.PENDING.value(),
+          RechargeConstants.RechargeStatus.FAILED.value(), PAYMENT_NOT_INITIATED_CODE,
+          PAYMENT_NOT_INITIATED_MESSAGE, PAYMENT_NOT_INITIATED_STATUS, Boolean.FALSE,
+          updateDateTime);
+      if (updated <= 0) {
+        LOG.debug(LogFormatter.instance()
+            .message("Skipped abandoned BBPS recharge closure because recharge is no longer pending")
+            .data("rechargeId", recharge.getId())
+            .data("clientTransactionId", recharge.getClientTransactionId()).format());
+        return;
+      }
+
+      recharge.setStatus(RechargeConstants.RechargeStatus.FAILED.value());
+      recharge.setResponseCode(PAYMENT_NOT_INITIATED_CODE);
+      recharge.setResponseMessage(PAYMENT_NOT_INITIATED_MESSAGE);
+      recharge.setBbpsTxnStatus(PAYMENT_NOT_INITIATED_STATUS);
+      recharge.setIsRefundRequired(Boolean.FALSE);
+      recharge.setUpdateDateTime(updateDateTime);
+
+      LOG.info(LogFormatter.instance()
+          .message("Closed abandoned BBPS pending recharge without refund")
+          .data("rechargeId", recharge.getId())
+          .data("clientTransactionId", recharge.getClientTransactionId())
+          .data("billPaymentToken", recharge.getBillPaymentToken())
+          .data("partnerTransRefId", recharge.getPartnerTransRefId())
+          .format());
+    } catch (Exception e) {
+      LOG.warn(LogFormatter.instance()
+          .message("Failed to close abandoned BBPS pending recharge")
+          .data("rechargeId", recharge != null ? recharge.getId() : null)
+          .data("refundCaseId", refundCase != null ? refundCase.getId() : null)
+          .format(), e);
+    }
+  }
+
+  private boolean shouldMarkRechargePaymentNotInitiated(BbpsRefundCase refundCase,
+      Recharge recharge, String source) {
+    return isSchedulerSource(source)
+        && isNoAggrepayDebitEvidenceResolution(refundCase)
+        && isPendingRecharge(recharge)
+        && !hasAggrepayDebitEvidence(refundCase)
+        && !hasRefundActivity(refundCase)
+        && !hasProviderBillpaySubmissionEvidence(refundCase, recharge);
+  }
+
+  private boolean isNoAggrepayDebitEvidenceResolution(BbpsRefundCase refundCase) {
+    return refundCase != null
+        && !Boolean.TRUE.equals(refundCase.getRefundRequired())
+        && StringUtils.equals(refundCase.getRefundStatus(),
+            BbpsRefundConstants.RefundStatus.NOT_REQUIRED)
+        && StringUtils.equals(refundCase.getRefundReason(),
+            BbpsRefundConstants.RefundReason.NO_AG_DEBIT_EVIDENCE);
+  }
+
+  private boolean isPendingRecharge(Recharge recharge) {
+    return recharge != null
+        && RechargeConstants.RechargeStatus.PENDING.value().equals(recharge.getStatus());
+  }
+
+  private boolean hasRefundActivity(BbpsRefundCase refundCase) {
+    return refundCase != null
+        && (StringUtils.isNotBlank(refundCase.getRefundReferenceId())
+            || refundCase.getRefundInitiatedAt() != null
+            || refundCase.getRefundCompletedAt() != null
+            || isRefundInFlight(refundCase));
+  }
+
+  private boolean hasProviderBillpaySubmissionEvidence(BbpsRefundCase refundCase,
+      Recharge recharge) {
+    if (refundCase != null
+        && (StringUtils.isNotBlank(refundCase.getPaymentRefNo())
+            || StringUtils.isNotBlank(refundCase.getLastBbpsResponse())
+            || Boolean.TRUE.equals(refundCase.getBillpayCalled()))) {
+      return true;
+    }
+
+    if (recharge == null) {
+      return false;
+    }
+
+    if (StringUtils.isNotBlank(recharge.getPaymentRefNo())
+        || StringUtils.isNotBlank(recharge.getRawResponse())
+        || StringUtils.isNotBlank(recharge.getRawBBpsTxnStatus())) {
+      return true;
+    }
+
+    if (StringUtils.isNotBlank(recharge.getBbpsTxnStatus())
+        && !StringUtils.equalsIgnoreCase(recharge.getBbpsTxnStatus(),
+            PAYMENT_NOT_INITIATED_STATUS)) {
+      return true;
+    }
+
+    if (StringUtils.isNotBlank(recharge.getResponseCode())
+        && !StringUtils.equalsIgnoreCase(recharge.getResponseCode(),
+            PAYMENT_NOT_INITIATED_CODE)) {
+      return true;
+    }
+
+    String responseMessage = StringUtils.trimToEmpty(recharge.getResponseMessage());
+    return StringUtils.isNotBlank(responseMessage)
+        && !StringUtils.equalsIgnoreCase(responseMessage, PAYMENT_PROCESS_PENDING_MESSAGE)
+        && !StringUtils.equalsIgnoreCase(responseMessage, PAYMENT_NOT_INITIATED_MESSAGE);
   }
 
   private BbpsRefundCase saveRefundCaseIfChanged(BbpsRefundCase refundCase, String originalState) {

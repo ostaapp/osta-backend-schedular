@@ -59,4 +59,13 @@ public class RechargeDBServiceImpl extends RechargeDBService {
 		}
 		return rechargeDao.update(recharge);
 	}
+
+	@Override
+	@Transactional
+	public int markPaymentNotInitiatedIfPending(Integer rechargeId, Integer pendingStatus, Integer failedStatus,
+			String responseCode, String responseMessage, String bbpsTxnStatus, Boolean refundRequired,
+			String updateDateTime) {
+		return rechargeDao.markPaymentNotInitiatedIfPending(rechargeId, pendingStatus, failedStatus,
+				responseCode, responseMessage, bbpsTxnStatus, refundRequired, updateDateTime);
+	}
 }

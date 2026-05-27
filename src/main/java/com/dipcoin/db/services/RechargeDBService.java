@@ -36,5 +36,10 @@ public abstract class RechargeDBService {
 		return new AsyncResult<>(updateRecharge(recharge));
 	}
 
+	abstract public int markPaymentNotInitiatedIfPending(final Integer rechargeId,
+			final Integer pendingStatus, final Integer failedStatus, final String responseCode,
+			final String responseMessage, final String bbpsTxnStatus, final Boolean refundRequired,
+			final String updateDateTime);
+
 
 }

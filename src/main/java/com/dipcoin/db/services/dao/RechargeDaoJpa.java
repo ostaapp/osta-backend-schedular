@@ -96,4 +96,27 @@ public class RechargeDaoJpa extends GenericDaoImpl<Recharge> implements Recharge
 		return list.get(0);
 	}
 
+	@Override
+	public int markPaymentNotInitiatedIfPending(Integer rechargeId, Integer pendingStatus, Integer failedStatus,
+			String responseCode, String responseMessage, String bbpsTxnStatus, Boolean refundRequired,
+			String updateDateTime) {
+		if (rechargeId == null || rechargeId <= 0) {
+			return 0;
+		}
+		return getEm().createQuery("UPDATE Recharge r SET r.status = :failedStatus, "
+				+ "r.responseCode = :responseCode, r.responseMessage = :responseMessage, "
+				+ "r.bbpsTxnStatus = :bbpsTxnStatus, r.isRefundRequired = :refundRequired, "
+				+ "r.updateDateTime = :updateDateTime WHERE r.id = :rechargeId "
+				+ "AND r.status = :pendingStatus")
+				.setParameter("failedStatus", failedStatus)
+				.setParameter("responseCode", responseCode)
+				.setParameter("responseMessage", responseMessage)
+				.setParameter("bbpsTxnStatus", bbpsTxnStatus)
+				.setParameter("refundRequired", refundRequired)
+				.setParameter("updateDateTime", updateDateTime)
+				.setParameter("rechargeId", rechargeId)
+				.setParameter("pendingStatus", pendingStatus)
+				.executeUpdate();
+	}
+
 }

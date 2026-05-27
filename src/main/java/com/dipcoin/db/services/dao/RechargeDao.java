@@ -16,6 +16,10 @@ public interface RechargeDao extends GenericDao<Recharge> {
 	
 	public Recharge findByClientTransactionId(String clientTransactionId);
 
+	public int markPaymentNotInitiatedIfPending(Integer rechargeId, Integer pendingStatus,
+			Integer failedStatus, String responseCode, String responseMessage, String bbpsTxnStatus,
+			Boolean refundRequired, String updateDateTime);
+
 }
 
 
