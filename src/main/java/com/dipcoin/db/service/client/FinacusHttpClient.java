@@ -363,5 +363,512 @@ public class FinacusHttpClient {
 			throw new Exception("Unable to extract JSON from transaction status SOAP response: " + e.getMessage(), e);
 		}
 	}
+	
+	private BillerCategoriesResponse fetchFromUrl(String apiUrl) throws Exception {
+        log.info("Calling Finacus API - URL: {}", apiUrl);
+        
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpPost post = new HttpPost(apiUrl);
+            post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+            post.setEntity(new StringEntity("coverage=")); // body
 
+            try (CloseableHttpResponse response = client.execute(post)) {
+                String responseBody = EntityUtils.toString(response.getEntity());
+                
+                log.info("Finacus API Response - URL: {} | Response Size: {} bytes", apiUrl, responseBody.length());
+                log.debug("Finacus API Response Body: {}", responseBody);
+
+                // Convert XML to JSON
+                JSONObject xmlJson = XML.toJSONObject(responseBody);
+
+                // Extract actual JSON content inside <string>...</string>
+                String jsonContent = xmlJson.getJSONObject("string").getString("content");
+
+                // Map JSON to POJO
+                BillerCategoriesResponse result = objectMapper.readValue(jsonContent, BillerCategoriesResponse.class);
+                
+                log.info("Finacus API Response parsed successfully - URL: {} | ResponseCode: {} | Items: {}", 
+                        apiUrl, 
+                        result.getResponseCode(), 
+                        result.getResponse() != null ? result.getResponse().size() : 0);
+                
+                return result;
+            }
+        } catch (Exception e) {
+            log.error("Finacus API call failed - URL: {} | Error: {}", apiUrl, e.getMessage(), e);
+            throw e;
+        }
+    }
+	
+	 public BillerCategoriesResponse fetchBillerCategories() throws Exception {
+	        return fetchFromUrl(billerCategoryUrl);
+	    }
+	 
+	 public BillersByCategoryResponse getBillersByCategory(String categoryId, String coverage) throws Exception {
+
+	        if (coverage == null)
+	            coverage = "";
+
+	        String checksumInput = categoryId + "|" + coverage;
+	        String checksum = checksumUtil.generateChecksum(checksumInput);
+
+	        String body = "categoryId=" + categoryId +
+	                "&checksum=" + checksum +
+	                "&coverage=" + coverage;
+
+	        HttpPost post = new HttpPost(billerByCategoriesUrl);
+	        post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+	        post.setEntity(new StringEntity(body));
+
+	        try (CloseableHttpClient client = HttpClients.createDefault();
+	                CloseableHttpResponse response = client.execute(post)) {
+
+	            String xmlResponse = EntityUtils.toString(response.getEntity());
+	            JSONObject jsonObj = XML.toJSONObject(xmlResponse);
+
+	            // Extract <string><content> actual JSON
+	            String contentJson = jsonObj.getJSONObject("string").getString("content");
+
+	            return objectMapper.readValue(contentJson, BillersByCategoryResponse.class);
+	        }
+	    }
+	    
+	 public String fetchCustomerParams(String billerId) throws Exception {
+
+	        // Generate checksum input format EXACTLY required by Finacus
+	        String checksumInput = billerId;
+	        String checksum = checksumUtil.generateChecksum(checksumInput);
+
+	        // Build request body
+	        String body = "billerId=" + billerId +
+	                "&checksum=" + checksum;
+
+	        // Get URL from properties file
+	        HttpPost post = new HttpPost(customerUrl);
+	        post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+	        post.setEntity(new StringEntity(body));
+
+	        try (CloseableHttpClient client = HttpClients.createDefault();
+	                CloseableHttpResponse response = client.execute(post)) {
+
+	            // Raw XML
+	            String xmlResponse = EntityUtils.toString(response.getEntity());
+
+	            // Convert XML → JSONObject
+	            JSONObject jsonObj = XML.toJSONObject(xmlResponse);
+
+	            // Extract pure JSON inside <string>content</string>
+	            return jsonObj.getJSONObject("string").getString("content");
+	        }
+	    }
+
+	 /**
+	     * Send complaint status request to Finacus
+	     * 
+	     * @param complaintType Type of complaint (e.g., "TXN")
+	     * @param complaintId   Complaint ID from registration
+	     * @return JSON response from Finacus
+	     * @throws Exception if SOAP call fails
+	     */
+	    public String sendComplaintStatusRequest(String complaintType, String complaintId) throws Exception {
+
+	        if (complaintType == null || complaintId == null) {
+	            throw new IllegalArgumentException("complaintType and complaintId cannot be null");
+	        }
+
+	        String safeComplaintType = safe(complaintType);
+	        String safeComplaintId = safe(complaintId);
+
+	        // 1) Build checksum string: complaintType|complaintId
+	        String rawChecksumInput = String.join("|",
+	                safeComplaintType,
+	                safeComplaintId);
+
+	        log.debug("Complaint Status Checksum Raw String = {}", rawChecksumInput);
+
+	        // 2) Generate checksum
+	        String checksum = checksumUtil.generateChecksum(rawChecksumInput);
+	        log.debug("Generated Complaint Status Checksum = {}", checksum);
+
+	        // 3) Build SOAP 1.1 Envelope
+	        String soapRequest = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+	                "<soap:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+	                "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
+	                "xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
+	                "  <soap:Body>\n" +
+	                "    <SendComplaintStatusRequest xmlns=\"http://tempuri.org/\">\n" +
+	                "      <complaintType>" + escapeXml(safeComplaintType) + "</complaintType>\n" +
+	                "      <complaintId>" + escapeXml(safeComplaintId) + "</complaintId>\n" +
+	                "      <checksum>" + escapeXml(checksum) + "</checksum>\n" +
+	                "    </SendComplaintStatusRequest>\n" +
+	                "  </soap:Body>\n" +
+	                "</soap:Envelope>";
+
+	        HttpHeaders headers = new HttpHeaders();
+	        headers.add("Content-Type", "text/xml; charset=utf-8");
+	        headers.add("SOAPAction", "http://tempuri.org/SendComplaintStatusRequest");
+
+	        HttpEntity<String> entity = new HttpEntity<>(soapRequest, headers);
+	        String soapEndpoint = resolveSoapEndpoint(complaintUrl);
+
+	        log.info("Calling Finacus Complaint Status SOAP 1.1 URL: {}", soapEndpoint);
+	        log.debug("=== SOAP REQUEST ===\n{}", soapRequest);
+
+	        String soapResponse = restTemplate.postForObject(soapEndpoint, entity, String.class);
+
+	        log.debug("=== SOAP RESPONSE ===\n{}", soapResponse);
+
+	        // Extract the actual JSON result
+	        String json = extractComplaintStatusResult(soapResponse);
+
+	        log.info("Finacus Complaint Status JSON = {}", json);
+
+	        return json;
+	    }
+	    
+	    /**
+	     * Extract JSON result from SendComplaintStatusRequest SOAP response
+	     */
+	    private String extractComplaintStatusResult(String soapResponse) throws Exception {
+
+	        if (soapResponse == null)
+	            throw new Exception("SOAP response is NULL");
+
+	        JSONObject xml = XML.toJSONObject(soapResponse);
+
+	        JSONObject envelope = xml.optJSONObject("soap:Envelope") != null ? xml.optJSONObject("soap:Envelope")
+	                : xml.optJSONObject("soapenv:Envelope") != null ? xml.optJSONObject("soapenv:Envelope")
+	                        : xml.optJSONObject("Envelope");
+
+	        if (envelope == null)
+	            throw new Exception("SOAP Envelope not found");
+
+	        JSONObject body = envelope.optJSONObject("soap:Body") != null ? envelope.optJSONObject("soap:Body")
+	                : envelope.optJSONObject("soapenv:Body") != null ? envelope.optJSONObject("soapenv:Body")
+	                        : envelope.optJSONObject("Body");
+
+	        if (body == null)
+	            throw new Exception("SOAP Body not found");
+
+	        // 1) Main response wrapper
+	        JSONObject resp = body.optJSONObject("SendComplaintStatusRequestResponse");
+
+	        if (resp != null && resp.has("SendComplaintStatusRequestResult")) {
+	            return resp.getString("SendComplaintStatusRequestResult");
+	        }
+
+	        // 2) Backup: Finacus sometimes returns <string>
+	        if (body.has("string")) {
+	            return body.getString("string");
+	        }
+
+	        throw new Exception("Unable to extract complaint status result from SOAP response");
+	    }
+
+	    private String escapeXml(String value) {
+	        if (value == null) {
+	            return "";
+	        }
+	        return value.replace("&", "&amp;")
+	                .replace("<", "&lt;")
+	                .replace(">", "&gt;")
+	                .replace("\"", "&quot;")
+	                .replace("'", "&apos;");
+	    }
+	    
+	    private String safe(String s) {
+	        return s == null ? "" : s;
+	    }
+	    
+	    public List<String> getAllBillerIds() throws Exception {
+	        
+	        log.info("Calling Finacus API - getAllBillerIds | Starting to fetch all biller IDs");
+	        
+	        List<String> billerIds = new ArrayList<>();
+
+	        try {
+	            // Fetch all categories from Finacus
+	            BillerCategoriesResponse categories = fetchBillerCategories();
+
+	            if (categories != null && categories.getResponse() != null) {
+	                int totalCategories = categories.getResponse().size();
+	                log.info("Finacus API Response - getAllBillerIds | Total categories fetched: {}", totalCategories);
+	                
+	                // Iterate over each category
+	                for (BillerCategoryItem cat : categories.getResponse()) {
+	                    try {
+	                        log.info("Fetching billers for category: {} ({})", cat.getId(), cat.getName());
+	                        
+	                        // Fetch billers in this category
+	                        BillersByCategoryResponse billers = getBillersByCategory(String.valueOf(cat.getId()), null);
+
+	                        if (billers != null && billers.getResponse() != null) {
+	                            int billersInCategory = billers.getResponse().size();
+	                            log.info("Finacus API Response - Category {} | Billers found: {}", cat.getId(), billersInCategory);
+	                            
+	                            for (BillerItem b : billers.getResponse()) {
+	                                // Avoid duplicates
+	                                if (!billerIds.contains(b.getBillerId())) {
+	                                    billerIds.add(b.getBillerId());
+	                                }
+	                            }
+	                        } else {
+	                            log.warn("No billers found for category: {}", cat.getId());
+	                        }
+	                    } catch (Exception e) {
+	                        log.error("Error fetching billers for category {}: {}", cat.getId(), e.getMessage(), e);
+	                    }
+	                }
+	            } else {
+	                log.warn("Finacus API returned null or empty categories response");
+	            }
+
+	            log.info("Finacus API - getAllBillerIds completed | Total unique biller IDs: {}", billerIds.size());
+	            
+	            return billerIds;
+	            
+	        } catch (Exception e) {
+	            log.error("Finacus API call failed - getAllBillerIds | Error: {}", e.getMessage(), e);
+	            throw e;
+	        }
+	    }
+	    
+	    public List<String> getZonesForBiller(String billerId) throws Exception {
+
+	        String checksum = checksumUtil.generateChecksum(billerId);
+	        String body = "billerId=" + billerId + "&checksum=" + checksum;
+
+	        try {
+	            String xml = sendPost(customerParamsUrl, body);
+
+	            String json = XML.toJSONObject(xml)
+	                    .getJSONObject("string")
+	                    .getString("content");
+
+	            JsonNode root = objectMapper.readTree(json);
+	            JsonNode response = root.get("Response");
+
+	            List<String> zones = new ArrayList<>();
+
+	            if (response == null || !response.isArray()) {
+	                return zones;
+	            }
+
+	            for (JsonNode field : response) {
+	                if (field.has("name") && "Circle".equals(field.get("name").asText())) {
+
+	                    if (field.has("Regex")) {
+	                        String regex = field.get("Regex").asText();
+	                        String[] parts = regex.split("\\|");
+
+	                        for (String p : parts) {
+	                            String zone = p.replace("^(", "").replace(")$", "");
+	                            if (!zone.isEmpty()) {
+	                                zones.add(zone);
+	                            }
+	                        }
+	                    }
+	                }
+	            }
+
+	            return zones;
+
+	        } catch (Exception e) {
+	            log.error("Error fetching zones for biller {}: {}", billerId, e.getMessage());
+	            return new ArrayList<>();
+	        }
+	    }
+
+	    public String sendPost(String url, String body) throws Exception {
+
+	        HttpPost post = new HttpPost(url);
+	        post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+	        post.setEntity(new StringEntity(body));
+
+	        try (CloseableHttpClient client = HttpClients.createDefault();
+	                CloseableHttpResponse response = client.execute(post)) {
+
+	            return EntityUtils.toString(response.getEntity());
+	        }
+	    }
+
+	    public String fetchRechargePlans(String billerId, String zone) throws Exception {
+	        
+	        log.info("Calling Finacus API - fetchRechargePlans | URL: {} | BillerId: {} | Zone: {}", planUrl, billerId, zone);
+
+	        String checksumInput = billerId + "|" + zone;
+	        String checksum = checksumUtil.generateChecksum(checksumInput);
+
+	        String body = "BillerId=" + billerId +
+	                "&Zone=" + zone +
+	                "&checksum=" + checksum;
+
+	        HttpPost post = new HttpPost(planUrl);
+	        post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+	        post.setEntity(new StringEntity(body));
+
+	        try (CloseableHttpClient client = HttpClients.createDefault();
+	                CloseableHttpResponse response = client.execute(post)) {
+
+	            String xmlResponse = EntityUtils.toString(response.getEntity());
+	            
+	            log.info("Finacus API Response - fetchRechargePlans | URL: {} | Response Size: {} bytes", planUrl, xmlResponse.length());
+	            log.debug("Finacus API Response Body: {}", xmlResponse);
+
+	            JSONObject jsonObj = XML.toJSONObject(xmlResponse);
+
+	            String jsonContent = jsonObj.getJSONObject("string").getString("content");
+	            
+	            log.info("Finacus API Response parsed - fetchRechargePlans | URL: {} | JSON Size: {} bytes", planUrl, jsonContent.length());
+	            
+	            return jsonContent; // return pure JSON
+	        } catch (Exception e) {
+	            log.error("Finacus API call failed - fetchRechargePlans | URL: {} | BillerId: {} | Zone: {} | Error: {}", 
+	                    planUrl, billerId, zone, e.getMessage(), e);
+	            throw e;
+	        }
+	    }
+
+	    public List<RechargePlan> fetchPlans(String billerId, String circleName) {
+	        
+	        log.info("Calling Finacus API - fetchPlans | URL: {} | BillerId: {} | CircleName: {}", planUrl, billerId, circleName);
+	        
+	        try {
+	            // Build checksum
+	            String checksumInput = billerId + "|" + circleName;
+	            String checksum = checksumUtil.generateChecksum(checksumInput);
+
+	            String body = "BillerId=" + billerId +
+	                    "&Zone=" + circleName +
+	                    "&checksum=" + checksum;
+
+	            log.info("REQUEST BODY FOR PLANS: {}", body);
+
+	            HttpPost post = new HttpPost(planUrl);
+	            post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+	            post.setEntity(new StringEntity(body));
+
+	            CloseableHttpClient client = HttpClients.createDefault();
+	            CloseableHttpResponse response = client.execute(post);
+
+	            String xmlResponse = EntityUtils.toString(response.getEntity());
+	            
+	            log.info("Finacus API Response - fetchPlans | URL: {} | Response Size: {} bytes", planUrl, xmlResponse.length());
+	            log.info("RAW XML RESPONSE: {}", xmlResponse);
+
+	            JSONObject xmlJson = XML.toJSONObject(xmlResponse);
+	            String contentJson = xmlJson.getJSONObject("string").getString("content");
+	            
+	            log.info("Finacus API Response - fetchPlans | URL: {} | JSON Size: {} bytes", planUrl, contentJson.length());
+	            log.info("CONTENT JSON: {}", contentJson);
+
+	            JSONObject obj = new JSONObject(contentJson);
+	            
+	            String responseCode = obj.optString("ResponseCode", "");
+	            
+	            if (!responseCode.equals("000")) {
+	                log.warn("Finacus API returned non-success response - fetchPlans | URL: {} | ResponseCode: {} | Message: {}", 
+	                        planUrl, responseCode, obj.optString("ResponseMessage", ""));
+	                return List.of();
+	            }
+
+	            JSONArray arr = obj.optJSONArray("PlanDataList");
+	            if (arr == null || arr.length() == 0) {
+	                log.info("Finacus API returned empty PlanDataList - fetchPlans | URL: {} | BillerId: {} | CircleName: {}", 
+	                        planUrl, billerId, circleName);
+	                return List.of();
+	            }
+
+	            List<RechargePlan> list = new ArrayList<>();
+
+	            for (int i = 0; i < arr.length(); i++) {
+	                JSONObject p = arr.getJSONObject(i);
+
+	                RechargePlan rp = new RechargePlan();
+	                rp.setPlanId(p.optString("PLANID"));
+	                rp.setRechargeTalkTime(extractNumber(p.optString("TALKTIME")));
+	                rp.setRechargeValidity(p.optString("VALIDITY"));
+	                rp.setRechargeShortDescription(p.optString("PLANDESCRIPTION"));
+	                rp.setRechargeDescription(p.optString("PLANDESCRIPTION"));
+	                rp.setEuronetPlanType(p.optString("CATEGORYTYPE"));
+	                rp.setEuronetRechargeType(p.optString("TYPE"));
+	                rp.setRechargeMaster(p.optString("TYPE"));
+
+	                try {
+	                    rp.setRechargeValue(new BigDecimal(p.optString("AMOUNT", "0")));
+	                } catch (Exception e) {
+	                    rp.setRechargeValue(BigDecimal.ZERO);
+	                }
+
+	                list.add(rp);
+	            }
+	            
+	            log.info("Finacus API Response parsed successfully - fetchPlans | URL: {} | ResponseCode: {} | Plans: {}", 
+	                    planUrl, responseCode, list.size());
+
+	            return list;
+
+	        } catch (Exception e) {
+	            log.error("Finacus API call failed - fetchPlans | URL: {} | BillerId: {} | CircleName: {} | Error: {}", 
+	                    planUrl, billerId, circleName, e.getMessage(), e);
+	            return List.of();
+	        }
+	    }
+	    
+	    private BigDecimal extractNumber(String value) {
+	        if (value == null)
+	            return BigDecimal.ZERO;
+
+	        String numeric = value.replaceAll("[^0-9.]", ""); // keep numbers only
+
+	        if (numeric.isEmpty())
+	            return BigDecimal.ZERO;
+
+	        try {
+	            return new BigDecimal(numeric);
+	        } catch (Exception e) {
+	            return BigDecimal.ZERO;
+	        }
+	    }
+	    
+	    public ZoneResponse getZoneByBillerId(String billerId) throws Exception {
+	        
+	        log.info("Calling Finacus API - getZoneByBillerId | URL: {} | BillerId: {}", getZoneByBillerIdUrl, billerId);
+
+	        String checksumInput = billerId;
+	        String checksum = checksumUtil.generateChecksum(checksumInput);
+
+	        String body = "billerId=" + billerId +
+	                "&checksum=" + checksum;
+
+	        HttpPost post = new HttpPost(getZoneByBillerIdUrl);
+	        post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+	        post.setEntity(new StringEntity(body));
+
+	        try (CloseableHttpClient client = HttpClients.createDefault();
+	             CloseableHttpResponse response = client.execute(post)) {
+
+	            String xmlResponse = EntityUtils.toString(response.getEntity());
+	            
+	            log.info("Finacus API Response - getZoneByBillerId | URL: {} | Response Size: {} bytes", getZoneByBillerIdUrl, xmlResponse.length());
+	            log.debug("Finacus API Response Body: {}", xmlResponse);
+
+	            JSONObject jsonObj = XML.toJSONObject(xmlResponse);
+
+	            String contentJson = jsonObj.getJSONObject("string").getString("content");
+
+	            ZoneResponse zoneResponse =
+	                    objectMapper.readValue(contentJson, ZoneResponse.class);
+	            
+	            int zoneCount = (zoneResponse.getZoneList() != null) ? zoneResponse.getZoneList().size() : 0;
+	            log.info("Finacus API Response parsed - getZoneByBillerId | URL: {} | ResponseCode: {} | Zones: {}", 
+	                    getZoneByBillerIdUrl, zoneResponse.getResponseCode(), zoneCount);
+
+	            return zoneResponse;
+	        } catch (Exception e) {
+	            log.error("Finacus API call failed - getZoneByBillerId | URL: {} | BillerId: {} | Error: {}", 
+	                    getZoneByBillerIdUrl, billerId, e.getMessage(), e);
+	            throw e;
+	        }
+	    }
 }

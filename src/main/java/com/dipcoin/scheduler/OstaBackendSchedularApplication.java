@@ -1,5 +1,6 @@
 package com.dipcoin.scheduler;
 
+import com.dipcoin.api.resource.CustomerBillPaymentsInfoResource;
 import com.dipcoin.api.resource.MerchantSettlementResource;
 import com.dipcoin.partner.utils.ChecksumUtil;
 import com.dipcoin.scheduler.config.SchedulerProperties;
@@ -22,8 +23,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         pattern = "com\\.dipcoin\\.db\\.services\\.commons\\.DBConfig"))
 @EntityScan({"com.dipcoin.db.services.model", "com.dipcoin.partner.db.services.model"})
 @EnableJpaRepositories(basePackages = {"com.dipcoin.scheduler.repository",
-    "com.dipcoin.db.services.dao"})
-@Import({MerchantSettlementResource.class, ChecksumUtil.class})
+    "com.dipcoin.db.services.dao", "com.dipcoin.db.services"})
+@Import({MerchantSettlementResource.class, CustomerBillPaymentsInfoResource.class, ChecksumUtil.class})
 @EnableConfigurationProperties(SchedulerProperties.class)
 public class OstaBackendSchedularApplication {
 

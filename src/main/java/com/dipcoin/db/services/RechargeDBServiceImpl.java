@@ -15,6 +15,11 @@ public class RechargeDBServiceImpl extends RechargeDBService {
 	private RechargeDao rechargeDao;
 	
 	@Override
+	public List<Recharge> getRechargesWithComplaints() {
+		return rechargeDao.findRechargesWithComplaints();
+	}
+	
+	@Override
 	public List<Recharge> getRechargeByRequestTypeAndStartTimeAndEndTime(Integer requestType, Long startTime,
 			Long endTime) {
 

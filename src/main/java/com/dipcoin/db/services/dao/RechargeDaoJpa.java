@@ -44,6 +44,13 @@ public class RechargeDaoJpa extends GenericDaoImpl<Recharge> implements Recharge
 	}
 	
 	@Override
+	public List<Recharge> findRechargesWithComplaints() {
+		String queryStr = "SELECT r FROM Recharge r WHERE r.complaintId IS NOT NULL";
+		TypedQuery<Recharge> query = getEm().createQuery(queryStr, Recharge.class);
+		return query.getResultList();
+	}
+	
+	@Override
 	public Recharge findTransactionStatus(String ostaTransactionReferenceId) {
 		TypedQuery<Recharge> query = getEm().createQuery(Customer_RechargeStatus, Recharge.class);
 		query.setParameter("ostaTransactionReferenceId", ostaTransactionReferenceId);

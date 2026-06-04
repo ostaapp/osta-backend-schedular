@@ -10,6 +10,8 @@ import com.dipcoin.db.services.model.Recharge;
 
 
 public abstract class RechargeDBService {
+	
+	abstract public List<Recharge> getRechargesWithComplaints();
 
 	abstract public List<Recharge> getRechargeByRequestTypeAndStartTimeAndEndTime(Integer requestType, Long startTime,
 			Long endTime);

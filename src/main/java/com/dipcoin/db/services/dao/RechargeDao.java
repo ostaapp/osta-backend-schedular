@@ -5,6 +5,8 @@ import java.util.List;
 import com.dipcoin.db.services.model.Recharge;
 
 public interface RechargeDao extends GenericDao<Recharge> {
+	
+	public List<Recharge> findRechargesWithComplaints();
 
 	public List<Recharge> findRechargeByRequestTypeAndStartTimeAndEndTime(Integer requestType,Long startTime,Long endTime);
 	
