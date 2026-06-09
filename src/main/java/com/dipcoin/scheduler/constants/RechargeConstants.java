@@ -99,7 +99,9 @@ public final class RechargeConstants {
 	    INVALID_INPUT_INPUT_PARAMETERS_MISSING("IPM", "Invalid Input. Input Parameters Missing"),
 	    CUSTOMER_SUBSCRIPTION_LIMIT_REACHED("998", "Customer Subscription Limit Reached "),
 	    MERCHANT_EXCEEDED_AVAILABLE_BALANCE("EBO", "Merchant Exceeded Available Balance"),
-	    ACCOUNT_DETAILS_NOT_FOUND("FA01", "Account Details Not Found");
+	    ACCOUNT_DETAILS_NOT_FOUND("FA01", "Account Details Not Found"),
+	    PAYMENT_NOT_INITIATED("PNI", "Payment not initiated"),
+	    AGGREPAY_DEBIT_FAILED("AGF", "Aggrepay debit failed");
 
 	    //@formatter:on
 
