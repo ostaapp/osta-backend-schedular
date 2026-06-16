@@ -45,6 +45,12 @@ public class Recharge implements Serializable {
 
   private String additionalColumn3;
 
+  @Column(name = "PgOrderId")
+  private String pgOrderId;
+
+  @Column(name = "PgPartnerTransactionReferenceId")
+  private String pgPartnerTransactionReferenceId;
+
   private String additionalInfo;
 
   private String agentId;
@@ -219,6 +225,22 @@ public class Recharge implements Serializable {
 
   public void setAdditionalColumn3(String additionalColumn3) {
     this.additionalColumn3 = additionalColumn3;
+  }
+
+  public String getPgOrderId() {
+    return pgOrderId;
+  }
+
+  public void setPgOrderId(String pgOrderId) {
+    this.pgOrderId = pgOrderId;
+  }
+
+  public String getPgPartnerTransactionReferenceId() {
+    return pgPartnerTransactionReferenceId;
+  }
+
+  public void setPgPartnerTransactionReferenceId(String pgPartnerTransactionReferenceId) {
+    this.pgPartnerTransactionReferenceId = pgPartnerTransactionReferenceId;
   }
 
   public String getAdditionalInfo() {

@@ -484,6 +484,11 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
           firstNonBlank(refundCase.getClientTransactionId(), recharge.getClientTransactionId()));
       refundCase.setBillPaymentToken(
           firstNonBlank(refundCase.getBillPaymentToken(), recharge.getBillPaymentToken()));
+      String storedPgOrderId = resolveStoredPgOrderId(recharge);
+      if (StringUtils.isNotBlank(storedPgOrderId)
+          && !StringUtils.equals(refundCase.getOrderId(), storedPgOrderId)) {
+        refundCase.setOrderId(storedPgOrderId);
+      }
       refundCase.setPaymentRefNo(
           firstNonBlank(refundCase.getPaymentRefNo(), recharge.getPaymentRefNo()));
       refundCase.setCustomerId(firstNonBlank(refundCase.getCustomerId(), recharge.getCustomerId()));
@@ -528,6 +533,10 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
           .data("refundCasePartnerTransRefId", refundCase.getPartnerTransRefId())
           .format(), e);
     }
+  }
+
+  private String resolveStoredPgOrderId(Recharge recharge) {
+    return recharge != null ? StringUtils.trimToNull(recharge.getPgOrderId()) : null;
   }
 
   @Override
@@ -692,6 +701,8 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
     addPartnerTransactionReferenceId(partnerTransactionReferenceIds,
         extractPartnerTransactionReferenceIdFromRecharge(recharge));
     addPartnerTransactionReferenceId(partnerTransactionReferenceIds,
+        recharge != null ? recharge.getPgPartnerTransactionReferenceId() : null);
+    addPartnerTransactionReferenceId(partnerTransactionReferenceIds,
         recharge != null ? recharge.getPartnerTransRefId() : null);
     addPartnerTransactionReferenceId(partnerTransactionReferenceIds,
         refundCase != null ? refundCase.getPartnerTransRefId() : null);
@@ -844,22 +855,27 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
     boolean changed = mergeAuthoritativeCapturedPgDataIntoCase(refundCase,
         resolveCapturedPgDipcoinTransaction(recharge, refundCase, dipcoinTransaction));
 
-    if (hasAggrepayDebitEvidence(refundCase)
-        && StringUtils.isNotBlank(refundCase.getOrderId())
-        && StringUtils.isNotBlank(refundCase.getLastAgResponse())) {
-      return changed;
-    }
-    if (StringUtils.isBlank(refundCase.getPartnerTransRefId())) {
+    List<String> partnerTransactionReferenceIds =
+        collectPartnerTransactionReferenceIds(recharge, refundCase);
+    if (CollectionUtils.isEmpty(partnerTransactionReferenceIds)) {
       return changed;
     }
 
-    InternalCapturedPgTransactionResponse capturedResponse =
-        partnerInternalServices.getCapturedPgTransactionDetails(refundCase.getPartnerTransRefId(),
-            null);
-    if (capturedResponse == null) {
-      return changed;
+    for (String partnerTransactionReferenceId : partnerTransactionReferenceIds) {
+      InternalCapturedPgTransactionResponse capturedResponse =
+          partnerInternalServices.getCapturedPgTransactionDetails(partnerTransactionReferenceId,
+              null);
+      if (capturedResponse == null) {
+        continue;
+      }
+      return mergeCapturedPgResponseIntoCase(refundCase, capturedResponse, changed);
     }
 
+    return changed;
+  }
+
+  private boolean mergeCapturedPgResponseIntoCase(BbpsRefundCase refundCase,
+      InternalCapturedPgTransactionResponse capturedResponse, boolean changed) {
     String capturedPgTransactionId = StringUtils.trimToNull(capturedResponse.getCapturedTransactionId());
     if (StringUtils.isBlank(capturedPgTransactionId)) {
       capturedPgTransactionId = refundCase.getCapturedPgTransactionId();
@@ -879,7 +895,8 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
     }
 
     String partnerOrderId = StringUtils.trimToNull(capturedResponse.getOrderId());
-    if (!StringUtils.equals(refundCase.getOrderId(), partnerOrderId)) {
+    if (!StringUtils.equals(refundCase.getOrderId(), partnerOrderId)
+        && StringUtils.isNotBlank(partnerOrderId)) {
       refundCase.setOrderId(partnerOrderId);
       changed = true;
     }
@@ -1174,9 +1191,7 @@ public class BbpsRefundServiceImpl implements BbpsRefundService {
       return;
     }
 
-    if (StringUtils.isBlank(refundCase.getOrderId())) {
-      enrichCapturedPgData(refundCase);
-    }
+    enrichCapturedPgData(refundCase);
     if (StringUtils.isBlank(refundCase.getOrderId())) {
       return;
     }

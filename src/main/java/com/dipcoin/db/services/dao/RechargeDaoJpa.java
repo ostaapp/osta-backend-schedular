@@ -45,8 +45,13 @@ public class RechargeDaoJpa extends GenericDaoImpl<Recharge> implements Recharge
 	
 	@Override
 	public List<Recharge> findRechargesWithComplaints() {
-		String queryStr = "SELECT r FROM Recharge r WHERE r.complaintId IS NOT NULL";
+		String queryStr = "SELECT r FROM Recharge r WHERE r.complaintId IS NOT NULL "
+				+ "AND (r.complaintStatus IS NULL OR UPPER(r.complaintStatus) NOT IN "
+				+ "('CLOSED', 'RESOLVED', 'REJECTED', 'FAILED', 'CANCELLED', 'REFUNDED', "
+				+ "'BBPS_RAISE_TICKET_FAILED', 'INVALID_TICKET_ID')) "
+				+ "ORDER BY r.updateDateTime DESC";
 		TypedQuery<Recharge> query = getEm().createQuery(queryStr, Recharge.class);
+		query.setMaxResults(10);
 		return query.getResultList();
 	}
 	

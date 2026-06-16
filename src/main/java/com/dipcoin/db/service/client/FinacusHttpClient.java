@@ -29,6 +29,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
@@ -56,6 +57,8 @@ import java.util.regex.Pattern;
         },
         ignoreResourceNotFound = true)
 public class FinacusHttpClient {
+    private static final int TICKET_STATUS_CONNECT_TIMEOUT_MS = 5000;
+    private static final int TICKET_STATUS_READ_TIMEOUT_MS = 5000;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -578,6 +581,96 @@ public class FinacusHttpClient {
 	    
 	    private String safe(String s) {
 	        return s == null ? "" : s;
+	    }
+
+	    public String bbpsTicketStatus(String ticketId) throws Exception {
+
+	        if (ticketId == null || ticketId.isBlank()) {
+	            throw new IllegalArgumentException("BbpsTicketStatus: ticketId cannot be null or blank");
+	        }
+
+	        String safeTicketId = safe(ticketId);
+	        String generatedChecksum = checksumUtil.generateChecksum(safeTicketId);
+	        log.debug("BbpsTicketStatus Checksum for TicketId={} => {}", safeTicketId, generatedChecksum);
+
+	        String soapRequest = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+	                "<soap:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+	                "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
+	                "xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
+	                "  <soap:Body>\n" +
+	                "    <BbpsTicketStatus xmlns=\"http://tempuri.org/\">\n" +
+	                "      <TicketId>" + escapeXml(safeTicketId) + "</TicketId>\n" +
+	                "      <checksum>" + escapeXml(generatedChecksum) + "</checksum>\n" +
+	                "    </BbpsTicketStatus>\n" +
+	                "  </soap:Body>\n" +
+	                "</soap:Envelope>";
+
+	        HttpHeaders headers = new HttpHeaders();
+	        headers.add("Content-Type", "text/xml; charset=utf-8");
+	        headers.add("SOAPAction", "http://tempuri.org/BbpsTicketStatus");
+
+	        HttpEntity<String> entity = new HttpEntity<>(soapRequest, headers);
+	        String soapEndpoint = resolveSoapEndpoint(complaintUrl);
+
+	        log.info("Calling Finacus BbpsTicketStatus SOAP 1.1 URL: {}", soapEndpoint);
+	        log.debug("=== BBPS TICKET STATUS SOAP REQUEST ===\n{}", soapRequest);
+
+	        String soapResponse = ticketStatusRestTemplate().postForObject(soapEndpoint, entity, String.class);
+
+	        log.debug("=== BBPS TICKET STATUS SOAP RESPONSE ===\n{}", soapResponse);
+
+	        String json = extractTicketStatusResult(soapResponse);
+	        log.info("Finacus BbpsTicketStatus JSON = {}", json);
+	        return json;
+	    }
+
+	    private RestTemplate ticketStatusRestTemplate() {
+	        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+	        requestFactory.setConnectTimeout(TICKET_STATUS_CONNECT_TIMEOUT_MS);
+	        requestFactory.setReadTimeout(TICKET_STATUS_READ_TIMEOUT_MS);
+	        return new RestTemplate(requestFactory);
+	    }
+
+	    private String extractTicketStatusResult(String soapResponse) throws Exception {
+
+	        if (soapResponse == null) {
+	            throw new Exception("BbpsTicketStatus SOAP response is NULL");
+	        }
+
+	        JSONObject xml = XML.toJSONObject(soapResponse);
+
+	        JSONObject envelope = xml.optJSONObject("soap:Envelope") != null ? xml.optJSONObject("soap:Envelope")
+	                : xml.optJSONObject("soapenv:Envelope") != null ? xml.optJSONObject("soapenv:Envelope")
+	                        : xml.optJSONObject("Envelope");
+
+	        if (envelope == null) {
+	            throw new Exception("BbpsTicketStatus: SOAP Envelope not found");
+	        }
+
+	        JSONObject body = envelope.optJSONObject("soap:Body") != null ? envelope.optJSONObject("soap:Body")
+	                : envelope.optJSONObject("soapenv:Body") != null ? envelope.optJSONObject("soapenv:Body")
+	                        : envelope.optJSONObject("Body");
+
+	        if (body == null) {
+	            throw new Exception("BbpsTicketStatus: SOAP Body not found");
+	        }
+
+	        JSONObject resp = body.optJSONObject("BbpsTicketStatusResponse");
+	        if (resp != null && resp.has("BbpsTicketStatusResult")) {
+	            return resp.getString("BbpsTicketStatusResult");
+	        }
+
+	        if (body.has("string")) {
+	            return body.getString("string");
+	        }
+
+	        int jsonStart = soapResponse.indexOf("{");
+	        int jsonEnd = soapResponse.lastIndexOf("}");
+	        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+	            return soapResponse.substring(jsonStart, jsonEnd + 1).trim();
+	        }
+
+	        throw new Exception("BbpsTicketStatus: Unable to extract result from SOAP response");
 	    }
 	    
 	    public List<String> getAllBillerIds() throws Exception {

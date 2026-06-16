@@ -1,5 +1,7 @@
 package com.dipcoin.scheduler.scheduled;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -21,6 +23,7 @@ import org.json.JSONObject;
 public class ComplaintStatusScheduler {
 
     private static final Logger LOG = LogManager.getLogger(ComplaintStatusScheduler.class);
+    private static final int COMPLAINT_DESCRIPTION_LIMIT = 240;
 
     @Autowired
     private RechargeDBService rechargeDBService;
@@ -31,8 +34,8 @@ public class ComplaintStatusScheduler {
     @Autowired
     private BbpsRefundService bbpsRefundService;
 
-//    @Scheduled(cron = "0 34 12 * * ?")
-//    @Scheduled(cron = "0 0 0 * * ?")
+    @Scheduled(cron = "0 0 0 * * ?")
+//    @Scheduled(cron = "0 */1 * * * ?")
     public void updateComplaintStatuses() {
         LOG.info("=== Complaint Status Scheduler Started ===");
 
@@ -49,6 +52,11 @@ public class ComplaintStatusScheduler {
                 try {
                     processStatusUpdate(recharge);
                 } catch (Exception e) {
+                    if (isFinacusConnectivityFailure(e)) {
+                        LOG.warn("Finacus ticket status endpoint unreachable for complaintId {}: {}. Stopping this scheduler run.",
+                                recharge.getComplaintId(), e.getMessage());
+                        break;
+                    }
                     LOG.error("Error processing status update for complaintId {}: {}", recharge.getComplaintId(),
                             e.getMessage());
                 }
@@ -61,39 +69,47 @@ public class ComplaintStatusScheduler {
         LOG.info("=== Complaint Status Scheduler Completed ===");
     }
 
+    private boolean isFinacusConnectivityFailure(Exception e) {
+        Throwable current = e;
+        while (current != null) {
+            if (current instanceof ConnectException || current instanceof SocketTimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+
+        String message = StringUtils.defaultString(e.getMessage()).toLowerCase();
+        return message.contains("connect timed out") || message.contains("connection timed out");
+    }
+
     private void processStatusUpdate(Recharge recharge) throws Exception {
         String complaintId = recharge.getComplaintId();
         if (StringUtils.isBlank(complaintId)) {
             return;
         }
 
-        LOG.info("Updating status for complaintId: {}", complaintId);
+        String ticketId = complaintId.trim();
+        LOG.info("Updating BBPS ticket status for ticketId: {}", ticketId);
 
-        // Call Finacus SOAP client (returns JSON string)
-        String finacusJson = finacusHttpClient.sendComplaintStatusRequest("Transaction", complaintId);
+        String finacusJson = finacusHttpClient.bbpsTicketStatus(ticketId);
 
         if (StringUtils.isBlank(finacusJson)) {
-            LOG.warn("Finacus API returned empty response for complaintId: {}", complaintId);
+            LOG.warn("Finacus API returned empty response for ticketId: {}", ticketId);
             return;
         }
 
-        // Parse the JSON result
         JSONObject json = new JSONObject(finacusJson);
         String responseCode = json.optString("ResponseCode", "");
+        String finacusTicketStatus = json.optString("TicketStatus", "");
+        String responseMessage = json.optString("ResponseMessage", "NULL RESPONSE");
+        String remarks = json.optString("description", "");
+        if (StringUtils.isBlank(remarks)) {
+            remarks = responseMessage;
+        }
 
         if ("000".equals(responseCode)) {
-            String newStatus = json.optString("ComplaintStatus", "");
-            if (StringUtils.isBlank(newStatus)) {
-                newStatus = json.optString("Status", "");
-            }
-
-            String remarks = json.optString("Remarks", "");
-            if (StringUtils.isBlank(remarks)) {
-                remarks = json.optString("StatusDetails", "");
-            }
-
-            if (StringUtils.isNotBlank(newStatus)) {
-                recharge.setComplaintStatus(newStatus);
+            if (StringUtils.isNotBlank(finacusTicketStatus)) {
+                recharge.setComplaintStatus(finacusTicketStatus);
                 recharge.setComplaintDescription(remarks);
                 rechargeDBService.updateRecharge(recharge);
                 if (bbpsRefundService != null) {
@@ -101,11 +117,23 @@ public class ComplaintStatusScheduler {
                     bbpsRefundService.triggerRefundAfterCommit(recharge.getId(),
                             BbpsRefundConstants.StatusSource.FINACUS);
                 }
-                LOG.info("Updated complaintId {} to status: {} with remarks: {}", complaintId, newStatus, remarks);
+                LOG.info("Updated ticketId {} to status: {} with remarks: {}", ticketId, finacusTicketStatus, remarks);
             }
         } else {
-            LOG.warn("Finacus API returned failure for complaintId {}: {}", complaintId,
-                    json.optString("ResponseMessage", "NULL RESPONSE"));
+            String failedStatus = StringUtils.defaultIfBlank(finacusTicketStatus, "FAILED");
+            recharge.setComplaintStatus(failedStatus);
+            recharge.setComplaintDescription(limitDescription("Finacus ResponseCode: " + responseCode
+                    + ", ResponseMessage: " + remarks));
+            rechargeDBService.updateRecharge(recharge);
+            LOG.warn("Finacus API returned failure for ticketId {}: code={}, status={}, message={}", ticketId,
+                    responseCode, failedStatus, responseMessage);
         }
+    }
+
+    private String limitDescription(String description) {
+        if (description == null || description.length() <= COMPLAINT_DESCRIPTION_LIMIT) {
+            return description;
+        }
+        return description.substring(0, COMPLAINT_DESCRIPTION_LIMIT);
     }
 }
